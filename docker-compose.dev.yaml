@@ -1,0 +1,106 @@
+version: "3.9"
+    
+services:
+  database:
+    depends_on:
+      - website-network,
+      - website-database
+    container_name: ${WEBSITE_ID}-database
+    image: mariadb:${MARIADB_VERSION}
+    restart: always
+    volumes:
+      - website-database:/var/lib/mysql
+    networks:
+      - website-network
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ${WEBSITE_ID}
+    labels:
+      - arkod-wp=database
+      - arkod-wp.website-id=${WEBSITE_ID}
+    healthcheck:
+      start_period: 5s
+      interval: 5s
+      timeout: 10s
+      test: [ "CMD", "mysqladmin" ,"ping", "-h", "${WEBSITE_ID}-database" ]
+ 
+  wordpress:
+    depends_on:
+      - database
+    container_name: ${WEBSITE_ID}-wordpress
+    image: wordpress:${WORDPRESS_VERSION}
+    restart: always
+    volumes:
+      - ${WORDPRESS_DIR}:/var/www/html
+      - ./config/php.conf.ini:/usr/local/etc/php/conf.d/php.ini
+    networks:
+      - website-network
+    ports:
+      - "${WORDPRESS_PORT}:80"
+    environment:
+      WORDPRESS_DB_HOST: ${WEBSITE_ID}-database
+      WORDPRESS_DB_USER: ${DB_USER}
+      WORDPRESS_DB_PASSWORD: ${DB_PASSWORD}
+      WORDPRESS_DB_NAME: ${WEBSITE_ID}
+      WORDPRESS_DB_TABLE_PREFIX: ${DB_TABLES_PREFIX}
+    labels:
+      - arkod-wp=wordpress
+      - arkod-wp.website-id=${WEBSITE_ID}
+    healthcheck:
+      start_period: 5s
+      interval: 5s
+      timeout: 10s
+      test: [ "CMD-SHELL", "curl -f http://${WEBSITE_ID}-wordpress || exit 1" ]
+
+  phpmyadmin:
+    depends_on:
+      - database
+    container_name: ${WEBSITE_ID}-phpmyadmin
+    image: phpmyadmin/phpmyadmin:${PHPMYADMIN_VERSION}
+    restart: always
+    networks:
+      - website-network
+    ports:
+      - "${PHPMYADMIN_PORT}:80"
+    environment:
+      PMA_HOST: ${WEBSITE_ID}-database
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+    labels:
+      - arkod-wp=phpmyadmin
+      - arkod-wp.website-id=${WEBSITE_ID}
+
+  cli:
+    depends_on:
+      - wordpress
+    container_name: ${WEBSITE_ID}-cli
+    image: wordpress:cli
+    networks:
+      - website-network
+    volumes:
+      - website-database:/var/lib/mysql
+      - ${WORDPRESS_DIR}:/var/www/html
+      - ${PLUGINS_DIR}:/plugins
+    environment:
+      WORDPRESS_DB_HOST: ${WEBSITE_ID}-database
+      WORDPRESS_DB_USER: ${DB_USER}
+      WORDPRESS_DB_PASSWORD: ${DB_PASSWORD}
+      WORDPRESS_DB_NAME: ${WEBSITE_ID}
+      WORDPRESS_DB_TABLE_PREFIX: ${DB_TABLES_PREFIX}
+    labels:
+      - arkod-wp=cli
+      - arkod-wp.website-id=${WEBSITE_ID}
+    command: ["tail", "-f", "/dev/null"]
+
+networks:
+  website-network:
+    name: ${WEBSITE_ID}-network
+    labels:
+      - arkod-wp=${WEBSITE_ID}_network
+
+volumes:
+  website-database:
+    name: ${WEBSITE_ID}-database
+    labels:
+      - arkod-wp=${WEBSITE_ID}-database_volume
