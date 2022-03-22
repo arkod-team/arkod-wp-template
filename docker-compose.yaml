@@ -1,0 +1,104 @@
+version: "3.9"
+
+services:
+  database:
+    container_name: ${WEBSITE_ID}-db
+    hostname: db.${WEBSITE_ID}.localhost
+    image: mariadb:${MARIADB_VERSION}
+    restart: always
+    volumes:
+      - website-database:/var/lib/mysql
+    networks:
+      - arkod-wp-network
+      - website-network
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ${WEBSITE_ID}
+    labels:
+      - arkod-wp=database
+      - arkod-wp.website-id=${WEBSITE_ID}
+      - traefik.tcp.services.${WEBSITE_ID}-db.loadbalancer.server.port=3306
+      - traefik.tcp.routers.${WEBSITE_ID}-mysql.rule=HostSNI(`db.${WEBSITE_ID}.localhost`)
+    healthcheck:
+      start_period: 5s
+      interval: 5s
+      timeout: 10s
+      test: [ "CMD-SHELL", "mysqladmin ping -h db.${WEBSITE_ID}.localhost -p${DB_ROOT_PASSWORD}" ]
+ 
+  wordpress:
+    depends_on:
+      - database
+    container_name: ${WEBSITE_ID}-wp
+    hostname: ${WEBSITE_ID}.localhost
+    image: wordpress:${WORDPRESS_VERSION}
+    restart: always
+    volumes:
+      - ./${WORDPRESS_DIR}:/var/www/html
+      - ./config/wordpress.php.conf.ini:/usr/local/etc/php/conf.d/php.ini
+    networks:
+      - arkod-wp-network
+      - website-network
+    environment:
+      WORDPRESS_DB_HOST: ${WEBSITE_ID}-db
+      WORDPRESS_DB_USER: ${DB_USER}
+      WORDPRESS_DB_PASSWORD: ${DB_PASSWORD}
+      WORDPRESS_DB_NAME: ${WEBSITE_ID}
+      WORDPRESS_TABLE_PREFIX: ${DB_TABLES_PREFIX}
+    labels:
+      - arkod-wp=wordpress
+      - arkod-wp.website-id=${WEBSITE_ID}
+      - traefik.enable=true
+      - traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https
+      - traefik.http.services.${WEBSITE_ID}.loadbalancer.server.port=80
+      - traefik.http.routers.${WEBSITE_ID}-http.rule=Host(`${WEBSITE_ID}.localhost`)
+      - traefik.http.routers.${WEBSITE_ID}-http.entrypoints=http
+      - traefik.http.routers.${WEBSITE_ID}-http.middlewares=redirect-to-https@docker
+      - traefik.http.routers.${WEBSITE_ID}-https.rule=Host(`${WEBSITE_ID}.localhost`)
+      - traefik.http.routers.${WEBSITE_ID}-https.entrypoints=https
+      - traefik.http.routers.${WEBSITE_ID}-https.tls=true
+      - traefik.http.routers.${WEBSITE_ID}-https.tls.certresolver=letsencrypt
+    healthcheck:
+      start_period: 5s
+      interval: 5s
+      timeout: 10s
+      test: [ "CMD-SHELL", "curl -fLI ${WEBSITE_ID}.localhost || exit 1" ]
+
+  cli:
+    depends_on:
+      - wordpress
+    container_name: ${WEBSITE_ID}-cli
+    image: wordpress:cli
+    networks:
+      - website-network
+    volumes:
+      - website-database:/var/lib/mysql
+      - ./${WORDPRESS_DIR}:/var/www/html
+      - ./${PLUGINS_DIR}:/plugins
+    environment:
+      WORDPRESS_DB_HOST: ${WEBSITE_ID}-db
+      WORDPRESS_DB_USER: ${DB_USER}
+      WORDPRESS_DB_PASSWORD: ${DB_PASSWORD}
+      WORDPRESS_DB_NAME: ${WEBSITE_ID}
+      WORDPRESS_TABLE_PREFIX: ${DB_TABLES_PREFIX}
+    labels:
+      - arkod-wp=cli
+      - arkod-wp.website-id=${WEBSITE_ID}
+    command: ["tail", "-f", "/dev/null"]
+
+
+networks:
+  arkod-wp-network:
+    external: true
+  website-network:
+    name: ${WEBSITE_ID}-network
+    labels:
+      - arkod-wp=${WEBSITE_ID}_network
+
+
+volumes:
+  website-database:
+    name: ${WEBSITE_ID}-db
+    labels:
+      - arkod-wp=${WEBSITE_ID}_volume
